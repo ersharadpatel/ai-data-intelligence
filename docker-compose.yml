@@ -1,0 +1,23 @@
+services:
+
+  # Main AI development environment.
+  ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: ai_data_intelligence
+
+    # Mount the Windows project directory into the container.
+    volumes:
+      - .:/workspace
+
+    # Expose JupyterLab to the local Windows browser.
+    ports:
+      - "127.0.0.1:8888:8888"
+
+    # Keep the development container running.
+    command: sleep infinity
+
+    # Restart the container when Docker restarts.
+    restart: unless-stopped

@@ -1,0 +1,17 @@
+# Exclude the local Python environment.
+.venv/
+venv/
+
+# Exclude Python cache files.
+__pycache__/
+*.pyc
+
+# Exclude Git history.
+.git/
+
+# Exclude generated model artifacts.
+artifacts/
+
+# Exclude temporary files.
+*.log
+.ipynb_checkpoints/

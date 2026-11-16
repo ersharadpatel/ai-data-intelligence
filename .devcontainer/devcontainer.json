@@ -1,0 +1,16 @@
+{
+  "name": "AI Data Intelligence",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "ai",
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "none",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  }
+}
