@@ -7,6 +7,8 @@ import {
   type DemoDataset,
 } from './lib/clientDataset'
 import { formatBytes, recordSuccessfulUpload, UPLOAD_LIMITS, validateUploadFile } from './lib/uploadSecurity'
+import { apiFetch } from './lib/api'
+import { IS_STATIC_HOST } from './lib/config'
 
 type Dataset = DemoDataset
 
@@ -28,15 +30,32 @@ export default function DatasetPanel() {
     refreshLocal()
   }, [])
 
-  async function processCsv(filename: string, text: string) {
+  async function processCsv(filename: string, text: string, originalFile?: File) {
     const dataset = analyzeCsvText(filename, text)
     const next = [dataset, ...loadDemoDatasets().filter((d) => d.filename !== dataset.filename)].slice(0, 12)
     saveDemoDatasets(next)
     setDatasets(next)
     setSelected(dataset)
     setPreview(dataset.preview)
-      setMessage('Dataset analyzed successfully. Quality report is ready.')
     recordSuccessfulUpload()
+
+    // On the full platform server, also store the file so Training can use it
+    if (!IS_STATIC_HOST && originalFile) {
+      try {
+        const body = new FormData()
+        body.append('file', originalFile, filename)
+        const response = await apiFetch('/datasets/upload', { method: 'POST', body })
+        const json = await response.json()
+        if (response.ok && (json.success || json.data)) {
+          setMessage('Dataset analyzed and saved to the platform. It is ready in Model Training.')
+          return
+        }
+      } catch {
+        // Local quality report still succeeded
+      }
+    }
+
+    setMessage('Dataset analyzed successfully. Quality report is ready.')
   }
 
   async function uploadDataset() {
@@ -57,7 +76,7 @@ export default function DatasetPanel() {
       if (text.includes('\u0000')) {
         throw new Error('File content looks invalid for CSV.')
       }
-      await processCsv(check.safeName, text)
+      await processCsv(check.safeName, text, file!)
       setFile(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to analyze dataset')

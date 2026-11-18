@@ -15,6 +15,7 @@ import SettingsPanel from './SettingsPanel'
 import { apiFetch, ApiUnavailableError } from './lib/api'
 import { IS_STATIC_HOST } from './lib/config'
 import { loadDemoDatasets } from './lib/clientDataset'
+import { loadWorkspaceDatasets } from './lib/datasets'
 type Stats = {
   total_predictions: number
   total_buyers: number
@@ -58,23 +59,28 @@ function ModelTrainingPanel() {
   const [mode, setMode] = useState('')
 
   useEffect(() => {
-    if (IS_STATIC_HOST) {
-      setError('Model training needs the full platform server. On GitHub Pages, use Datasets for CSV checks.')
-      return
-    }
-    apiFetch('/datasets?page=1&limit=50')
-      .then(r => r.json())
-      .then(j => {
-        if (j.success) {
-          setDatasets(j.datasets || [])
-          if (j.datasets?.length) setDatasetId(j.datasets[0].dataset_id)
-        } else setError(j.detail || 'Could not load datasets')
+    loadWorkspaceDatasets()
+      .then((list) => {
+        setDatasets(list)
+        if (list.length) setDatasetId(list[0].dataset_id)
+        if (IS_STATIC_HOST) {
+          setError('Training runs on the full platform server. Your uploaded datasets are listed below — open Datasets to inspect quality.')
+        }
       })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Backend connection failed'))
+      .catch((e) => setError(e instanceof Error ? e.message : 'Could not load datasets'))
   }, [])
 
   async function execute(action: 'train' | 'tune') {
     if (!datasetId || busy) return
+    if (IS_STATIC_HOST) {
+      setError('Training is not available on GitHub Pages. Use http://127.0.0.1:8001 for full model training.')
+      return
+    }
+    const selected = datasets.find((d) => d.dataset_id === datasetId)
+    if (selected?.source === 'local') {
+      setError('This dataset is only in the browser. Re-upload it while the platform server is running, then train.')
+      return
+    }
     if (action === 'train' && !window.confirm(
       'Training will activate a new production model and replace the currently active model. Continue?'
     )) return
@@ -113,6 +119,7 @@ function ModelTrainingPanel() {
   const metrics = result?.result?.final_test_metrics || result?.best_experiment?.validation_metrics
   const modelName = result?.result?.best_model || result?.best_experiment?.name
   const split = result?.result?.split
+  const canTrain = !IS_STATIC_HOST && datasets.some((d) => d.dataset_id === datasetId && d.source === 'api')
 
   return (
     <div className="dataset-module">
@@ -122,20 +129,28 @@ function ModelTrainingPanel() {
 
       <div className="panel training-panel">
         <h3>Select training dataset</h3>
-        <select value={datasetId} onChange={e => { setDatasetId(e.target.value); setResult(null) }}>
+        <select value={datasetId} onChange={e => { setDatasetId(e.target.value); setResult(null); setError('') }}>
           <option value="">Choose a dataset</option>
-          {datasets.map(d => <option key={d.dataset_id} value={d.dataset_id}>{d.filename}</option>)}
+          {datasets.map(d => (
+            <option key={d.dataset_id} value={d.dataset_id}>
+              {d.filename} ({d.total_rows} rows{d.source === 'local' ? ' · browser' : ''})
+            </option>
+          ))}
         </select>
-        {datasets.length === 0 && <p>No datasets available. Upload a dataset first.</p>}
+        {datasets.length === 0 && <p>No datasets available. Upload a dataset first from the Datasets page.</p>}
         <div className="training-actions">
-          <button className="dataset-primary" disabled={!datasetId || busy} onClick={() => execute('train')}>
+          <button className="dataset-primary" disabled={!datasetId || busy || !canTrain} onClick={() => execute('train')}>
             {busy && mode === 'train' ? 'Training...' : 'Train Production Model'}
           </button>
-          <button className="dataset-secondary" disabled={!datasetId || busy} onClick={() => execute('tune')}>
+          <button className="dataset-secondary" disabled={!datasetId || busy || !canTrain} onClick={() => execute('tune')}>
             {busy && mode === 'tune' ? 'Tuning...' : 'Auto Tune (5 experiments)'}
           </button>
         </div>
-        <p className="training-note">Training activates the new model in production. Auto Tune runs experiments separately and does not change the active production model.</p>
+        <p className="training-note">
+          {IS_STATIC_HOST
+            ? 'GitHub Pages lists your browser uploads here for reference. Full training needs the local platform server.'
+            : 'Training activates the new model in production. Auto Tune runs experiments separately and does not change the active production model.'}
+        </p>
       </div>
 
       {busy && <div className="panel"><p>Model is processing. Please wait...</p></div>}
@@ -198,18 +213,19 @@ function ExperimentsPanel() {
 
   async function load() {
     try {
-      const [er, dr] = await Promise.all([
-        apiFetch('/experiments?page=1&limit=100'),
-        apiFetch('/datasets?page=1&limit=50')
-      ])
+      const localDatasets = await loadWorkspaceDatasets()
+      setDatasets(localDatasets)
+      if (!datasetId && localDatasets.length) setDatasetId(localDatasets[0].dataset_id)
+
+      if (IS_STATIC_HOST) {
+        setExperiments([])
+        return
+      }
+
+      const er = await apiFetch('/experiments?page=1&limit=100')
       const ej = await er.json()
-      const dj = await dr.json()
       if (!er.ok || !ej.success) throw new Error(ej.detail || 'Could not load experiments')
       setExperiments(ej.experiments || [])
-      if (dj.success) {
-        setDatasets(dj.datasets || [])
-        if (!datasetId && dj.datasets?.length) setDatasetId(dj.datasets[0].dataset_id)
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Loading failed')
     }
