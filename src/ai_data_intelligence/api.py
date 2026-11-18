@@ -1650,3 +1650,54 @@ def auto_tune_dataset(dataset_id: str, request: AutoTuneRequest):
     finally:
         db.close()
 
+
+# ---------------------------------------------------------------------------
+# Same-origin hosting: /api/* → existing routes, and serve the React build
+# ---------------------------------------------------------------------------
+import os
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+FRONTEND_DIST = Path(
+    os.environ.get(
+        "FRONTEND_DIST",
+        str(Path(__file__).resolve().parents[2] / "frontend" / "dist"),
+    )
+)
+
+
+@app.middleware("http")
+async def strip_api_prefix(request, call_next):
+    """Allow the UI to call /api/... on the same host as FastAPI."""
+    path = request.scope.get("path", "")
+    if path == "/api" or path.startswith("/api/"):
+        new_path = path[4:] or "/"
+        request.scope["path"] = new_path
+        if "raw_path" in request.scope:
+            request.scope["raw_path"] = new_path.encode("utf-8")
+    return await call_next(request)
+
+
+if FRONTEND_DIST.exists():
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="frontend-assets")
+
+    samples_dir = FRONTEND_DIST / "samples"
+    if samples_dir.exists():
+        app.mount("/samples", StaticFiles(directory=str(samples_dir)), name="frontend-samples")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        """SPA fallback — API routes registered above take priority."""
+        candidate = FRONTEND_DIST / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        index = FRONTEND_DIST / "index.html"
+        if index.exists():
+            return FileResponse(index)
+        raise HTTPException(
+            status_code=404,
+            detail="Frontend build not found. Run npm run build in frontend/.",
+        )
+

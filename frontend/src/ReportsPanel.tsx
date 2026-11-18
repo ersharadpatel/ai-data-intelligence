@@ -6,6 +6,8 @@ import {
   RefreshCw,
   Printer
 } from 'lucide-react'
+import { apiFetch } from './lib/api'
+import { IS_STATIC_HOST } from './lib/config'
 
 type ReportData = {
   datasets: any[]
@@ -41,15 +43,20 @@ export default function ReportsPanel() {
     setError('')
 
     try {
+      if (IS_STATIC_HOST) {
+        setError('Reports need the full platform server. On GitHub Pages, use Datasets for CSV quality checks.')
+        return
+      }
+
       const endpoints = [
-        '/api/datasets?page=1&limit=100',
-        '/api/models',
-        '/api/experiments?page=1&limit=100',
-        '/api/predictions?page=1&limit=100'
+        '/datasets?page=1&limit=100',
+        '/models',
+        '/experiments?page=1&limit=100',
+        '/predictions?page=1&limit=100'
       ]
 
       const responses = await Promise.all(
-        endpoints.map(url => fetch(url))
+        endpoints.map(url => apiFetch(url))
       )
 
       const results = await Promise.all(

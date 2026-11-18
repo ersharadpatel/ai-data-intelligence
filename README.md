@@ -15,7 +15,7 @@ Full model training / experiments / registry still need the FastAPI backend (loc
 
 ## Free public hosting (GitHub Pages)
 
-Anyone can open the site and check a CSV — no paid hosting needed.
+GitHub Pages hosts the **frontend only** (no Python). CSV quality checks run in the browser on the same URL.
 
 1. Push this repo to GitHub (public)
 2. Repo **Settings → Pages → Build and deployment → Source: GitHub Actions**
@@ -24,9 +24,26 @@ Anyone can open the site and check a CSV — no paid hosting needed.
 
 `https://<your-username>.github.io/<repo-name>/`
 
-Example if the repo is `ai-data-intelligence`:
+Example: `https://ersharadpatel.github.io/ai-data-intelligence/`
 
-`https://<your-username>.github.io/ai-data-intelligence/`
+## One server (UI + API same URL)
+
+For full training / predictions on **one port**:
+
+```bash
+# build UI then run API (serves frontend/dist + /api on :8001)
+cd frontend && npm ci && npm run build && cd ..
+uvicorn ai_data_intelligence.api:app --app-dir src --host 0.0.0.0 --port 8001
+```
+
+Or Docker (single container):
+
+```bash
+docker build -f Dockerfile.prod -t intelliflow .
+docker run -p 8001:8001 intelliflow
+```
+
+Open `http://localhost:8001` — UI and API share the same origin (no separate Python URL).
 
 ## Local frontend demo
 

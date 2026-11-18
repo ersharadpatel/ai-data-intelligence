@@ -12,6 +12,9 @@ import './App.css'
 import ReportsPanel from './ReportsPanel'
 import DatasetPanel from './DatasetPanel'
 import SettingsPanel from './SettingsPanel'
+import { apiFetch, ApiUnavailableError } from './lib/api'
+import { IS_STATIC_HOST } from './lib/config'
+import { loadDemoDatasets } from './lib/clientDataset'
 type Stats = {
   total_predictions: number
   total_buyers: number
@@ -55,7 +58,11 @@ function ModelTrainingPanel() {
   const [mode, setMode] = useState('')
 
   useEffect(() => {
-    fetch('/api/datasets?page=1&limit=50')
+    if (IS_STATIC_HOST) {
+      setError('Model training needs the full platform server. On GitHub Pages, use Datasets for CSV checks.')
+      return
+    }
+    apiFetch('/datasets?page=1&limit=50')
       .then(r => r.json())
       .then(j => {
         if (j.success) {
@@ -63,7 +70,7 @@ function ModelTrainingPanel() {
           if (j.datasets?.length) setDatasetId(j.datasets[0].dataset_id)
         } else setError(j.detail || 'Could not load datasets')
       })
-      .catch(() => setError('Backend connection failed'))
+      .catch((e) => setError(e instanceof Error ? e.message : 'Backend connection failed'))
   }, [])
 
   async function execute(action: 'train' | 'tune') {
@@ -79,7 +86,7 @@ function ModelTrainingPanel() {
     setMode(action)
 
     try {
-      const response = await fetch(`/api/datasets/${datasetId}/${action}`, {
+      const response = await apiFetch(`/datasets/${datasetId}/${action}`, {
         method: 'POST',
         headers: action === 'tune' ? { 'Content-Type': 'application/json' } : undefined,
         body: action === 'tune' ? JSON.stringify({
@@ -192,8 +199,8 @@ function ExperimentsPanel() {
   async function load() {
     try {
       const [er, dr] = await Promise.all([
-        fetch('/api/experiments?page=1&limit=100'),
-        fetch('/api/datasets?page=1&limit=50')
+        apiFetch('/experiments?page=1&limit=100'),
+        apiFetch('/datasets?page=1&limit=50')
       ])
       const ej = await er.json()
       const dj = await dr.json()
@@ -214,7 +221,7 @@ function ExperimentsPanel() {
     if (!name.trim() || !datasetId) return
     setBusy(true); setError(''); setMessage('')
     try {
-      const r = await fetch('/api/experiments', {
+      const r = await apiFetch('/experiments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -237,7 +244,7 @@ function ExperimentsPanel() {
   async function runExperiment(id: string) {
     setBusy(true); setError(''); setMessage('')
     try {
-      const r = await fetch(`/api/experiments/${id}/run`, { method: 'POST' })
+      const r = await apiFetch(`/experiments/${id}/run`, { method: 'POST' })
       const j = await r.json()
       if (!r.ok || !j.success) throw new Error(j.detail || 'Experiment run failed')
       setMessage('Experiment completed successfully.')
@@ -256,7 +263,7 @@ function ExperimentsPanel() {
         experiment_b: selectedB,
         metric_name: 'roc_auc'
       })
-      const r = await fetch(`/api/experiments/compare?${params}`)
+      const r = await apiFetch(`/experiments/compare?${params}`)
       const j = await r.json()
       if (!r.ok || !j.success) throw new Error(j.detail || 'Comparison failed')
       setComparison(j)
@@ -354,8 +361,8 @@ function ModelRegistryPanel() {
     setError('')
     try {
       const [mr, ar] = await Promise.all([
-        fetch('/api/models'),
-        fetch('/api/models/active')
+        apiFetch('/models'),
+        apiFetch('/models/active')
       ])
       const mj = await mr.json()
       const aj = await ar.json()
@@ -379,7 +386,7 @@ function ModelRegistryPanel() {
     setError('')
     setMessage('')
     try {
-      const r = await fetch(`/api/models/${encodeURIComponent(version)}/activate`, {
+      const r = await apiFetch(`/models/${encodeURIComponent(version)}/activate`, {
         method: 'POST'
       })
       const j = await r.json()
@@ -400,7 +407,7 @@ function ModelRegistryPanel() {
     setComparison(null)
     try {
       const params = new URLSearchParams({ version_a: versionA, version_b: versionB })
-      const r = await fetch(`/api/models/compare?${params}`)
+      const r = await apiFetch(`/models/compare?${params}`)
       const j = await r.json()
       if (!r.ok || !j.success) throw new Error(j.detail || 'Model comparison failed')
       setComparison(j.comparison)
@@ -553,7 +560,7 @@ function PredictionsPanel() {
 
   async function loadHistory() {
     try {
-      const response = await fetch('/api/predictions?page=1&limit=10')
+      const response = await apiFetch('/predictions?page=1&limit=10')
       const json = await response.json()
       if (!response.ok || !json.success) {
         throw new Error(json.detail || 'Could not load prediction history')
@@ -595,7 +602,7 @@ function PredictionsPanel() {
         throw new Error('Please check the entered values.')
       }
 
-      const response = await fetch('/api/predict', {
+      const response = await apiFetch('/predict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -724,13 +731,38 @@ function App() {
     setError('')
 
     try {
+      if (IS_STATIC_HOST) {
+        const localDatasets = loadDemoDatasets()
+        const emptyPeriod = {
+          total_predictions: 0,
+          buyers: 0,
+          non_buyers: 0,
+          buyer_percentage: 0,
+        }
+        setStats({
+          total_predictions: localDatasets.length,
+          total_buyers: 0,
+          total_non_buyers: 0,
+          buyer_percentage: 0,
+          average_purchase_probability: 0,
+          average_processing_time_seconds: 0,
+        })
+        setAnalytics({
+          today: emptyPeriod,
+          last_7_days: emptyPeriod,
+          last_30_days: { ...emptyPeriod, total_predictions: localDatasets.length },
+        })
+        setLastUpdated(new Date().toLocaleTimeString())
+        return
+      }
+
       const [statsResponse, analyticsResponse] = await Promise.all([
-        fetch('/api/dashboard/stats'),
-        fetch('/api/dashboard/analytics'),
+        apiFetch('/dashboard/stats'),
+        apiFetch('/dashboard/analytics'),
       ])
 
       if (!statsResponse.ok || !analyticsResponse.ok) {
-        throw new Error('API request failed. Check that FastAPI is running on port 8001.')
+        throw new Error('API request failed. Start the platform server to load live metrics.')
       }
 
       const statsJson = await statsResponse.json()
@@ -744,7 +776,11 @@ function App() {
       setAnalytics(analyticsJson.data)
       setLastUpdated(new Date().toLocaleTimeString())
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load dashboard data.')
+      if (err instanceof ApiUnavailableError) {
+        setError(err.message)
+      } else {
+        setError(err instanceof Error ? err.message : 'Unable to load dashboard data.')
+      }
     } finally {
       setLoading(false)
     }
@@ -756,11 +792,11 @@ function App() {
 
   const cards = [
     {
-      title: 'Total Predictions',
+      title: IS_STATIC_HOST ? 'Datasets checked' : 'Total Predictions',
       value: stats?.total_predictions ?? 0,
       icon: Activity,
       color: 'purple',
-      detail: 'All recorded predictions',
+      detail: IS_STATIC_HOST ? 'CSV files analyzed in this browser' : 'All recorded predictions',
     },
     {
       title: 'Predicted Buyers',
@@ -905,7 +941,7 @@ function App() {
             <div className="panel chart-panel">
               <div className="panel-heading">
                 <div><h3>Prediction Activity</h3><p>Predictions across time periods</p></div>
-                <span className="chart-tag">LIVE API DATA</span>
+                <span className="chart-tag">{IS_STATIC_HOST ? 'WORKSPACE' : 'LIVE API DATA'}</span>
               </div>
               <div className="chart-area">
                 {loading ? <div className="empty-state">Loading analytics...</div> : (
@@ -931,7 +967,7 @@ function App() {
             <div className="panel chart-panel">
               <div className="panel-heading">
                 <div><h3>Buyer Analysis</h3><p>Buyer vs non-buyer predictions</p></div>
-                <span className="chart-tag">LIVE API DATA</span>
+                <span className="chart-tag">{IS_STATIC_HOST ? 'WORKSPACE' : 'LIVE API DATA'}</span>
               </div>
               <div className="chart-area">
                 {loading ? <div className="empty-state">Loading analytics...</div> : (
@@ -970,17 +1006,32 @@ function App() {
             </div>
 
             <div className="panel health-panel">
-              <div className="panel-heading"><div><h3>Platform Status</h3><p>Backend connectivity</p></div><span className={`status-pill ${
-  error ? 'status-error' : loading ? 'status-loading' : 'status-connected'
+              <div className="panel-heading"><div><h3>Platform Status</h3><p>{IS_STATIC_HOST ? 'Deployment mode' : 'Backend connectivity'}</p></div><span className={`status-pill ${
+  IS_STATIC_HOST ? 'status-connected' : error ? 'status-error' : loading ? 'status-loading' : 'status-connected'
 }`}>
   <span />
-  {error ? 'Disconnected' : loading ? 'Checking...' : 'Connected'}
+  {IS_STATIC_HOST ? 'Online' : error ? 'Disconnected' : loading ? 'Checking...' : 'Connected'}
 </span></div>
               <div className="health-content">
                 <div className="health-symbol"><Activity size={28} /></div>
-                <div><strong>{error ? 'Connection issue' : loading ? 'Checking API...' : 'API response received'}</strong><p>{error || 'Dashboard statistics and analytics endpoints responded.'}</p></div>
+                <div>
+                  <strong>
+                    {IS_STATIC_HOST
+                      ? 'Browser workspace ready'
+                      : error
+                        ? 'Connection issue'
+                        : loading
+                          ? 'Checking API...'
+                          : 'API response received'}
+                  </strong>
+                  <p>
+                    {IS_STATIC_HOST
+                      ? 'CSV quality checks run in this browser. Open Datasets to upload a file.'
+                      : error || 'Dashboard statistics and analytics endpoints responded.'}
+                  </p>
+                </div>
               </div>
-              <div className="health-footer"><span>FastAPI Backend</span><strong>Port 8001</strong></div>
+              <div className="health-footer"><span>Hosting</span><strong>{IS_STATIC_HOST ? 'GitHub Pages' : 'Same-origin API'}</strong></div>
               <div className="health-footer"><span>Frontend</span><strong>React + Vite</strong></div>
             </div>
           </div>
